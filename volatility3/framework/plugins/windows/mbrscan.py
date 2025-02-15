@@ -147,7 +147,12 @@ class MBRScan(interfaces.plugins.PluginInterface):
                                 interfaces.renderers.Disassembly(
                                     bootcode, 0, architecture
                                 ),
-                                format_hints.HexBytes(bootcode),
+                                interfaces.renderers.LayerData(
+                                    context=self.context,
+                                    layer_name=layer.name,
+                                    offset=mbr_start_offset,
+                                    length=bootcode_length,
+                                ),
                             ),
                         )
 
@@ -255,7 +260,7 @@ class MBRScan(interfaces.plugins.PluginInterface):
                     ("EndingSector", int),
                     ("SectorInSize", format_hints.Hex),
                     ("Disasm", interfaces.renderers.Disassembly),
-                    ("Bootcode", format_hints.HexBytes),
+                    ("Bootcode", interfaces.renderers.LayerData),
                 ],
                 self._generator(),
             )
