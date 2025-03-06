@@ -8,7 +8,6 @@ from struct import pack, unpack
 from typing import List, Optional, Tuple
 
 from Crypto.Cipher import AES, ARC4, DES
-from Crypto.Hash import MD5
 
 from volatility3.framework import interfaces, renderers
 from volatility3.framework.configuration import requirements
@@ -33,7 +32,7 @@ class Hashdump(interfaces.plugins.PluginInterface):
                 architectures=["Intel32", "Intel64"],
             ),
             requirements.PluginRequirement(
-                name="hivelist", plugin=hivelist.HiveList, version=(1, 0, 0)
+                name="hivelist", plugin=hivelist.HiveList, version=(2, 0, 0)
             ),
         ]
 
@@ -529,7 +528,7 @@ class Hashdump(interfaces.plugins.PluginInterface):
         (des_k1, des_k2) = cls.sid_to_key(rid)
         des1 = DES.new(des_k1, DES.MODE_ECB)
         des2 = DES.new(des_k2, DES.MODE_ECB)
-        md5 = MD5.new()
+        md5 = hashlib.md5()
 
         md5.update(hbootkey[:0x10] + pack("<L", rid) + lmntstr)
         rc4_key = md5.digest()
@@ -594,12 +593,10 @@ class Hashdump(interfaces.plugins.PluginInterface):
         offset = self.config.get("offset", None)
         syshive = None
         samhive = None
-        kernel = self.context.modules[self.config["kernel"]]
         for hive in hivelist.HiveList.list_hives(
-            self.context,
-            self.config_path,
-            kernel.layer_name,
-            kernel.symbol_table_name,
+            context=self.context,
+            base_config_path=self.config_path,
+            kernel_module_name=self.config["kernel"],
             hive_offsets=None if offset is None else [offset],
         ):
             if hive.get_name().split("\\")[-1].upper() == "SYSTEM":

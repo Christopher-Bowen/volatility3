@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 import logging
 
 import volatility3.framework.symbols.linux.utilities.modules as linux_utilities_modules
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Tuple, Optional
 from volatility3 import framework
 from volatility3.framework import (
     constants,
@@ -17,6 +17,7 @@ from volatility3.framework import (
 from volatility3.framework.renderers import format_hints
 from volatility3.framework.configuration import requirements
 from volatility3.framework.symbols import linux
+from volatility3.framework.symbols.linux import network
 from volatility3.plugins.linux import lsmod
 
 vollog = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ class AbstractNetfilter(ABC):
         self.list_head_size = self.vmlinux.get_type("list_head").size
 
         lsmod_required_version = Netfilter._required_lsmod_version
-        lsmod_current_version = lsmod.Lsmod._version
+        lsmod_current_version = lsmod.Lsmod.version
         if not requirements.VersionRequirement.matches_required(
             lsmod_required_version, lsmod_current_version
         ):
@@ -91,7 +92,7 @@ class AbstractNetfilter(ABC):
             )
 
         linuxutils_required_version = Netfilter._required_linuxutils_version
-        linuxutils_current_version = linux.LinuxUtilities._version
+        linuxutils_current_version = linux.LinuxUtilities.version
         if not requirements.VersionRequirement.matches_required(
             linuxutils_required_version, linuxutils_current_version
         ):
@@ -99,11 +100,20 @@ class AbstractNetfilter(ABC):
                 f"linux.LinuxUtilities version not suitable: required {linuxutils_required_version} found {linuxutils_current_version}"
             )
 
+        linux_net_required_version = Netfilter._required_linuxnet_version
+        linux_net_current_version = network.NetSymbols.version
+        if not requirements.VersionRequirement.matches_required(
+            linux_net_required_version, linux_net_current_version
+        ):
+            raise exceptions.PluginRequirementException(
+                f"symbols.linux.net.NetSymbols version not suitable: required {linux_net_required_version} found {linux_net_current_version}"
+            )
+
         linux_utilities_modules_required_version = (
             Netfilter._required_linux_utilities_modules_version
         )
         linux_utilities_modules_current_version = (
-            linux_utilities_modules.Modules._version
+            linux_utilities_modules.Modules.version
         )
         if not requirements.VersionRequirement.matches_required(
             linux_utilities_modules_required_version,
@@ -112,6 +122,9 @@ class AbstractNetfilter(ABC):
             raise exceptions.PluginRequirementException(
                 f"linux_utilities_modules.Modules version not suitable: required {linux_utilities_modules_required_version} found {linux_utilities_modules_current_version}"
             )
+
+        symbol_table = self._context.symbol_space[self.vmlinux.symbol_table_name]
+        network.NetSymbols.apply(symbol_table)
 
         modules = lsmod.Lsmod.list_modules(context, kernel_module_name)
         self.handlers = linux.LinuxUtilities.generate_kernel_handler_info(
@@ -232,7 +245,9 @@ class AbstractNetfilter(ABC):
             for hook_idx, hook_name in enumerate(proto.hooks):
                 yield proto_idx, proto.name, hook_idx, hook_name
 
-    def build_nf_hook_ops_array(self, nf_hook_entries):
+    def build_nf_hook_ops_array(
+        self, nf_hook_entries
+    ) -> Optional[interfaces.objects.ObjectInterface]:
         """Function helper to build the nf_hook_ops array when it is not part of the
         struct 'nf_hook_entries' definition.
 
@@ -247,16 +262,27 @@ class AbstractNetfilter(ABC):
             }
         """
         nf_hook_entry_size = self.vmlinux.get_type("nf_hook_entry").size
+
+        try:
+            num_hook_entries = nf_hook_entries.num_hook_entries
+        except exceptions.InvalidAddressException:
+            return None
+
         orig_ops_addr = (
-            nf_hook_entries.hooks.vol.offset
-            + nf_hook_entry_size * nf_hook_entries.num_hook_entries
+            nf_hook_entries.hooks.vol.offset + nf_hook_entry_size * num_hook_entries
         )
+
+        if not self.vmlinux._context.layers[self.vmlinux.layer_name].is_valid(
+            orig_ops_addr
+        ):
+            return None
+
         orig_ops = self._context.object(
             object_type=self.get_symbol_fullname("array"),
             offset=orig_ops_addr,
             subtype=self.vmlinux.get_type("pointer"),
             layer_name=self.layer_name,
-            count=nf_hook_entries.num_hook_entries,
+            count=num_hook_entries,
         )
 
         return orig_ops
@@ -502,6 +528,9 @@ class NetfilterImp_4_14_to_4_16(AbstractNetfilter):
 
         nf_hook_ops_name = self.get_symbol_fullname("nf_hook_ops")
         nf_hook_ops_ptr_arr = self.build_nf_hook_ops_array(nf_hook_entries)
+        if not nf_hook_ops_ptr_arr:
+            return
+
         for nf_hook_ops_ptr in nf_hook_ops_ptr_arr:
             nf_hook_ops = nf_hook_ops_ptr.dereference().cast(nf_hook_ops_name)
             yield nf_hook_ops
@@ -682,6 +711,9 @@ class NetfilterNetDevImp_4_14_to_latest(AbstractNetfilterNetDev):
 
         nf_hook_ops_name = self.get_symbol_fullname("nf_hook_ops")
         nf_hook_ops_ptr_arr = self.build_nf_hook_ops_array(nf_hook_entries)
+        if not nf_hook_ops_ptr_arr:
+            return
+
         for nf_hook_ops_ptr in nf_hook_ops_ptr_arr:
             nf_hook_ops = nf_hook_ops_ptr.dereference().cast(nf_hook_ops_name)
             yield nf_hook_ops
@@ -690,13 +722,14 @@ class NetfilterNetDevImp_4_14_to_latest(AbstractNetfilterNetDev):
 class Netfilter(interfaces.plugins.PluginInterface):
     """Lists Netfilter hooks."""
 
-    _required_framework_version = (2, 0, 0)
+    _required_framework_version = (2, 22, 0)
 
-    _version = (1, 1, 0)
+    _version = (1, 1, 1)
 
     _required_linux_utilities_modules_version = (1, 0, 0)
     _required_linuxutils_version = (2, 1, 0)
     _required_lsmod_version = (2, 0, 0)
+    _required_linuxnet_version = (1, 0, 0)
 
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
@@ -718,6 +751,11 @@ class Netfilter(interfaces.plugins.PluginInterface):
                 name="linuxutils",
                 component=linux.LinuxUtilities,
                 version=cls._required_linuxutils_version,
+            ),
+            requirements.VersionRequirement(
+                name="linuxnet",
+                component=network.NetSymbols,
+                version=cls._required_linuxnet_version,
             ),
         ]
 

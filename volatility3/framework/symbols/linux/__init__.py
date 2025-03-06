@@ -72,17 +72,18 @@ class LinuxKernelIntermedSymbols(intermed.IntermediateSymbolTable):
         self.optional_set_type_class("rb_root", extensions.rb_root)
 
         # Network
-        self.set_type_class("net", extensions.net)
-        self.set_type_class("socket", extensions.socket)
-        self.set_type_class("sock", extensions.sock)
-        self.set_type_class("inet_sock", extensions.inet_sock)
-        self.set_type_class("unix_sock", extensions.unix_sock)
+        # FIXME: Deprecate all of this once the framework hits version 3
+        self.set_type_class("net", extensions.network.net)
+        self.set_type_class("socket", extensions.network.socket)
+        self.set_type_class("sock", extensions.network.sock)
+        self.set_type_class("inet_sock", extensions.network.inet_sock)
+        self.set_type_class("unix_sock", extensions.network.unix_sock)
         # Might not exist in older kernels or the current symbols
-        self.optional_set_type_class("netlink_sock", extensions.netlink_sock)
-        self.optional_set_type_class("vsock_sock", extensions.vsock_sock)
-        self.optional_set_type_class("packet_sock", extensions.packet_sock)
-        self.optional_set_type_class("bt_sock", extensions.bt_sock)
-        self.optional_set_type_class("xdp_sock", extensions.xdp_sock)
+        self.optional_set_type_class("netlink_sock", extensions.network.netlink_sock)
+        self.optional_set_type_class("vsock_sock", extensions.network.vsock_sock)
+        self.optional_set_type_class("packet_sock", extensions.network.packet_sock)
+        self.optional_set_type_class("bt_sock", extensions.network.bt_sock)
+        self.optional_set_type_class("xdp_sock", extensions.network.xdp_sock)
 
         # Only found in 6.1+ kernels
         self.optional_set_type_class("maple_tree", extensions.maple_tree)
@@ -668,7 +669,7 @@ class IDStorage(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_head_node(self, tree) -> int:
+    def get_head_node(self, tree) -> Optional[int]:
         """Returns a pointer to the tree's head"""
         raise NotImplementedError
 
@@ -701,7 +702,11 @@ class IDStorage(ABC):
         node = self.nodep_to_node(nodep)
         node_slots = node.slots
         for off in range(self.CHUNK_SIZE):
-            slot = node_slots[off]
+            try:
+                slot = node_slots[off]
+            except exceptions.InvalidAddressException:
+                continue
+
             if slot == 0:
                 continue
 
@@ -762,8 +767,11 @@ class XArray(IDStorage):
         node = self.nodep_to_node(nodep)
         return (node.shift // self.CHUNK_SHIFT) + 1
 
-    def get_head_node(self, tree) -> int:
-        return tree.xa_head
+    def get_head_node(self, tree) -> Optional[int]:
+        try:
+            return tree.xa_head
+        except exceptions.InvalidAddressException:
+            return None
 
     def node_is_internal(self, nodep) -> bool:
         return (nodep & self.XARRAY_TAG_MASK) == self.XARRAY_TAG_INTERNAL
@@ -871,8 +879,11 @@ class RadixTree(IDStorage):
 
         return height
 
-    def get_head_node(self, tree) -> int:
-        return tree.rnode
+    def get_head_node(self, tree) -> Optional[int]:
+        try:
+            return tree.rnode
+        except exceptions.InvalidAddressException:
+            return None
 
     def node_is_internal(self, nodep) -> bool:
         return (nodep & self.RADIX_TREE_INTERNAL_NODE) != 0

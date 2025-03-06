@@ -79,6 +79,7 @@ class PoolHeaderScanner(interfaces.layers.ScannerInterface):
                 offset=offset - self._header_offset,
                 absolute=True,
             )
+
             constraint = self._constraint_lookup[pattern]
             try:
                 # Size check
@@ -128,7 +129,7 @@ class PoolScanner(plugins.PluginInterface):
     """A generic pool scanner plugin."""
 
     _required_framework_version = (2, 0, 0)
-    _version = (1, 0, 1)
+    _version = (1, 1, 1)
 
     @classmethod
     def get_requirements(cls) -> List[interfaces.configuration.RequirementInterface]:
@@ -181,6 +182,36 @@ class PoolScanner(plugins.PluginInterface):
                 ),
             )
 
+    @staticmethod
+    def gui_poolscanner_constraints(
+        gui_table: str, tags_filter: Optional[List[bytes]] = None
+    ) -> List[PoolConstraint]:
+        """
+        Constraints for objects managed by the GUI subsystem (win32k*.sys)
+        """
+        builtins = [
+            PoolConstraint(
+                b"Wind",
+                type_name=gui_table + constants.BANG + "tagWINDOWSTATION",
+                size=(0x90, None),
+                page_type=PoolType.PAGED,
+                object_type="WindowStation",
+                skip_type_test=True,
+            ),
+            PoolConstraint(
+                b"Desk",
+                type_name=gui_table + constants.BANG + "tagDESKTOP",
+                page_type=PoolType.PAGED,
+                object_type="Desktop",
+                skip_type_test=True,
+            ),
+        ]
+
+        if not tags_filter:
+            return builtins
+
+        return [constraint for constraint in builtins if constraint.tag in tags_filter]
+
     @classmethod
     def builtin_constraints(
         cls, symbol_table: str, tags_filter: Optional[List[bytes]] = None
@@ -205,6 +236,7 @@ class PoolScanner(plugins.PluginInterface):
                 b"AtmT",
                 type_name=symbol_table + constants.BANG + "_RTL_ATOM_TABLE",
                 size=(200, None),
+                # TODO - update this after the GUI code goes on
                 page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
             ),
             # processes on windows before windows 8
@@ -214,7 +246,7 @@ class PoolScanner(plugins.PluginInterface):
                 object_type="Process",
                 size=(600, None),
                 skip_type_test=True,
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # processes on windows starting with windows 8
             PoolConstraint(
@@ -223,7 +255,7 @@ class PoolScanner(plugins.PluginInterface):
                 object_type="Process",
                 size=(600, None),
                 skip_type_test=True,
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # threads on windows before windows8
             PoolConstraint(
@@ -232,7 +264,7 @@ class PoolScanner(plugins.PluginInterface):
                 object_type="Thread",
                 size=(600, None),  # -> 0x0258 - size of struct in win5.1
                 skip_type_test=True,
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # threads on windows starting with windows8
             PoolConstraint(
@@ -240,7 +272,7 @@ class PoolScanner(plugins.PluginInterface):
                 type_name=symbol_table + constants.BANG + "_ETHREAD",
                 object_type="Thread",
                 size=(600, None),  # -> 0x0258 - size of struct in win5.1
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # files on windows before windows 8
             PoolConstraint(
@@ -248,7 +280,7 @@ class PoolScanner(plugins.PluginInterface):
                 type_name=symbol_table + constants.BANG + "_FILE_OBJECT",
                 object_type="File",
                 size=(150, None),
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # files on windows starting with windows 8
             PoolConstraint(
@@ -256,7 +288,7 @@ class PoolScanner(plugins.PluginInterface):
                 type_name=symbol_table + constants.BANG + "_FILE_OBJECT",
                 object_type="File",
                 size=(150, None),
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # mutants on windows before windows 8
             PoolConstraint(
@@ -264,7 +296,7 @@ class PoolScanner(plugins.PluginInterface):
                 type_name=symbol_table + constants.BANG + "_KMUTANT",
                 object_type="Mutant",
                 size=(64, None),
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # mutants on windows starting with windows 8
             PoolConstraint(
@@ -272,7 +304,7 @@ class PoolScanner(plugins.PluginInterface):
                 type_name=symbol_table + constants.BANG + "_KMUTANT",
                 object_type="Mutant",
                 size=(64, None),
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # drivers on windows before windows 8
             PoolConstraint(
@@ -280,7 +312,7 @@ class PoolScanner(plugins.PluginInterface):
                 type_name=symbol_table + constants.BANG + "_DRIVER_OBJECT",
                 object_type="Driver",
                 size=(248, None),
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
                 additional_structures=["_DRIVER_EXTENSION"],
             ),
             # drivers on windows starting with windows 8
@@ -289,14 +321,14 @@ class PoolScanner(plugins.PluginInterface):
                 type_name=symbol_table + constants.BANG + "_DRIVER_OBJECT",
                 object_type="Driver",
                 size=(248, None),
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # kernel modules
             PoolConstraint(
                 b"MmLd",
                 type_name=symbol_table + constants.BANG + "_LDR_DATA_TABLE_ENTRY",
                 size=(76, None),
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # symlinks on windows before windows 8
             PoolConstraint(
@@ -304,7 +336,7 @@ class PoolScanner(plugins.PluginInterface):
                 type_name=symbol_table + constants.BANG + "_OBJECT_SYMBOLIC_LINK",
                 object_type="SymbolicLink",
                 size=(72, None),
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # symlinks on windows starting with windows 8
             PoolConstraint(
@@ -312,14 +344,14 @@ class PoolScanner(plugins.PluginInterface):
                 type_name=symbol_table + constants.BANG + "_OBJECT_SYMBOLIC_LINK",
                 object_type="SymbolicLink",
                 size=(72, None),
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.NONPAGED | PoolType.FREE,
             ),
             # registry hives
             PoolConstraint(
                 b"CM10",
                 type_name=symbol_table + constants.BANG + "_CMHIVE",
                 size=(800, None),
-                page_type=PoolType.PAGED | PoolType.NONPAGED | PoolType.FREE,
+                page_type=PoolType.PAGED | PoolType.FREE,
                 skip_type_test=True,
             ),
         ]
@@ -330,11 +362,12 @@ class PoolScanner(plugins.PluginInterface):
         return [constraint for constraint in builtins if constraint.tag in tags_filter]
 
     @classmethod
-    def generate_pool_scan(
+    def generate_pool_scan_extended(
         cls,
         context: interfaces.context.ContextInterface,
-        layer_name: str,
-        symbol_table: str,
+        kernel_layer_name: str,
+        kernel_symbol_table_name: str,
+        object_symbol_table_name: str,
         constraints: List[PoolConstraint],
     ) -> Generator[
         Tuple[
@@ -346,49 +379,66 @@ class PoolScanner(plugins.PluginInterface):
         None,
     ]:
         """
+        The extended version of `generate_pool_scan` to support pool scanning for objects outside of the kernel (ntoskrnl).
+        This requires the symbol table of the object being scanned for.
 
         Args:
             context: The context to retrieve required elements (layers, symbol tables) from
-            layer_name: The name of the layer on which to operate
-            symbol_table: The name of the table containing the kernel symbols
+            kernel_layer_name: The name of the base kernel layer
+            kernel_symbol_table_name: The name of the table containing the kernel symbols
+            object_symbol_table_name: The name of the symbol table for the object being scanned for
             constraints: List of pool constraints used to limit the scan results
-
         Returns:
             Iterable of tuples, containing the constraint that matched, the object from memory, the object header used to determine the object
         """
 
         # get the object type map
         type_map = handles.Handles.get_type_map(
-            context=context, layer_name=layer_name, symbol_table=symbol_table
+            context=context,
+            layer_name=kernel_layer_name,
+            symbol_table=kernel_symbol_table_name,
         )
 
         cookie = handles.Handles.find_cookie(
-            context=context, layer_name=layer_name, symbol_table=symbol_table
+            context=context,
+            layer_name=kernel_layer_name,
+            symbol_table=kernel_symbol_table_name,
         )
 
-        is_windows_10 = versions.is_windows_10(context, symbol_table)
-        is_windows_8_or_later = versions.is_windows_8_or_later(context, symbol_table)
+        is_windows_10 = versions.is_windows_10(context, kernel_symbol_table_name)
+        is_windows_8_or_later = versions.is_windows_8_or_later(
+            context, kernel_symbol_table_name
+        )
 
         # start off with the primary virtual layer
-        scan_layer = layer_name
+        scan_layer = kernel_layer_name
 
         # switch to a non-virtual layer if necessary
         if not is_windows_10:
             scan_layer = context.layers[scan_layer].config["memory_layer"]
 
-        if symbols.symbol_table_is_64bit(context, symbol_table):
+        if symbols.symbol_table_is_64bit(
+            context=context, symbol_table_name=kernel_symbol_table_name
+        ):
             alignment = 0x10
         else:
             alignment = 8
 
+        # scan in the main kernel layer for the object(s)
         for constraint, header in cls.pool_scan(
-            context, scan_layer, symbol_table, constraints, alignment=alignment
+            context,
+            scan_layer,
+            object_symbol_table_name,
+            constraints,
+            alignment=alignment,
         ):
+
+            # construct the object in its own layer, using its own types
             mem_objects = header.get_object(
                 constraint=constraint,
                 use_top_down=is_windows_8_or_later,
-                native_layer_name=layer_name,
-                kernel_symbol_table=symbol_table,
+                native_layer_name=kernel_layer_name,
+                kernel_symbol_table=kernel_symbol_table_name,
             )
 
             for mem_object in mem_objects:
@@ -397,6 +447,7 @@ class PoolScanner(plugins.PluginInterface):
                         constants.LOGLEVEL_VVV,
                         f"Cannot create an instance of {constraint.type_name}",
                     )
+
                     continue
 
                 if constraint.object_type is not None and not constraint.skip_type_test:
@@ -416,6 +467,40 @@ class PoolScanner(plugins.PluginInterface):
                         continue
 
                 yield constraint, mem_object, header
+
+    @classmethod
+    def generate_pool_scan(
+        cls,
+        context: interfaces.context.ContextInterface,
+        layer_name: str,
+        symbol_table: str,
+        constraints: List[PoolConstraint],
+    ) -> Generator[
+        Tuple[
+            PoolConstraint,
+            interfaces.objects.ObjectInterface,
+            interfaces.objects.ObjectInterface,
+        ],
+        None,
+        None,
+    ]:
+        """
+        The original version of `generate_pool_scan` which is sufficient for objects in the kernel (ntoskrnl),
+
+        Args:
+            context: The context to retrieve required elements (layers, symbol tables) from
+            layer_name: The name of the layer on which to operate
+            symbol_table: The name of the table containing the kernel symbols
+            constraints: List of pool constraints used to limit the scan results
+
+        Returns:
+            Iterable of tuples, containing the constraint that matched, the object from memory, the object header used to determine the object
+        """
+
+        # repeat the symbol table to match the original `generate_pool_scan` behaviour
+        yield from cls.generate_pool_scan_extended(
+            context, layer_name, symbol_table, symbol_table, constraints
+        )
 
     @classmethod
     def pool_scan(
@@ -482,7 +567,9 @@ class PoolScanner(plugins.PluginInterface):
         except exceptions.SymbolError:
             # We have to manually load a symbol table
 
-            if symbols.symbol_table_is_64bit(context, symbol_table):
+            if symbols.symbol_table_is_64bit(
+                context=context, symbol_table_name=symbol_table
+            ):
                 is_win_7 = versions.is_windows_7(context, symbol_table)
                 if is_win_7:
                     pool_header_json_filename = "poolheader-x64-win7"

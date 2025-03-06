@@ -4,9 +4,9 @@
 import logging
 from struct import unpack
 from typing import Optional
+import hashlib
 
 from Crypto.Cipher import ARC4, DES, AES
-from Crypto.Hash import MD5, SHA256
 
 from volatility3.framework import interfaces, renderers, exceptions
 from volatility3.framework.configuration import requirements
@@ -36,7 +36,7 @@ class Lsadump(interfaces.plugins.PluginInterface):
                 name="hashdump", component=hashdump.Hashdump, version=(1, 1, 0)
             ),
             requirements.VersionRequirement(
-                name="hivelist", component=hivelist.HiveList, version=(1, 0, 0)
+                name="hivelist", component=hivelist.HiveList, version=(2, 0, 0)
             ),
         ]
 
@@ -45,7 +45,7 @@ class Lsadump(interfaces.plugins.PluginInterface):
         """
         Based on code from http://lab.mediaservice.net/code/cachedump.rb
         """
-        sha = SHA256.new()
+        sha = hashlib.sha256()
         sha.update(key)
         for _i in range(1, 1000 + 1):
             sha.update(secret[28:60])
@@ -89,7 +89,7 @@ class Lsadump(interfaces.plugins.PluginInterface):
         if not obf_lsa_key:
             return None
         if not vista_or_later:
-            md5 = MD5.new()
+            md5 = hashlib.md5()
             md5.update(bootkey)
             for _i in range(1000):
                 md5.update(obf_lsa_key[60:76])
@@ -209,13 +209,11 @@ class Lsadump(interfaces.plugins.PluginInterface):
     def run(self):
         offset = self.config.get("offset", None)
         syshive = sechive = None
-        kernel = self.context.modules[self.config["kernel"]]
 
         for hive in hivelist.HiveList.list_hives(
-            self.context,
-            self.config_path,
-            kernel.layer_name,
-            kernel.symbol_table_name,
+            context=self.context,
+            base_config_path=self.config_path,
+            kernel_module_name=self.config["kernel"],
             hive_offsets=None if offset is None else [offset],
         ):
             if hive.get_name().split("\\")[-1].upper() == "SYSTEM":

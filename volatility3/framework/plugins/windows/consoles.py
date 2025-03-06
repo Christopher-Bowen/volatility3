@@ -7,7 +7,7 @@
 import logging
 import os
 import struct
-from typing import Tuple, Generator, Set, Dict, Any, Type
+from typing import Tuple, Optional, Generator, Set, Dict, Any, Type, List
 
 from volatility3.framework import interfaces, symbols, exceptions
 from volatility3.framework import renderers
@@ -29,7 +29,9 @@ class Consoles(interfaces.plugins.PluginInterface):
     """Looks for Windows console buffers"""
 
     _required_framework_version = (2, 4, 0)
-    _version = (1, 0, 0)
+
+    # 2.0.0 - change the signature of `get_console_settings_from_registry`
+    _version = (2, 0, 0)
 
     @classmethod
     def get_requirements(cls):
@@ -41,13 +43,13 @@ class Consoles(interfaces.plugins.PluginInterface):
                 architectures=["Intel32", "Intel64"],
             ),
             requirements.VersionRequirement(
-                name="pslist", component=pslist.PsList, version=(2, 0, 0)
+                name="pslist", component=pslist.PsList, version=(3, 0, 0)
             ),
             requirements.VersionRequirement(
                 name="verinfo", component=verinfo.VerInfo, version=(1, 0, 0)
             ),
             requirements.PluginRequirement(
-                name="hivelist", plugin=hivelist.HiveList, version=(1, 0, 0)
+                name="hivelist", plugin=hivelist.HiveList, version=(2, 0, 0)
             ),
             requirements.BooleanRequirement(
                 name="no_registry",
@@ -74,7 +76,7 @@ class Consoles(interfaces.plugins.PluginInterface):
     @classmethod
     def find_conhost_proc(
         cls, proc_list: Generator[interfaces.objects.ObjectInterface, None, None]
-    ) -> Tuple[interfaces.context.ContextInterface, str]:
+    ) -> Generator[Tuple[interfaces.objects.ObjectInterface, str], None, None]:
         """
         Walks the process list and returns the conhost instances.
 
@@ -87,6 +89,7 @@ class Consoles(interfaces.plugins.PluginInterface):
 
         for proc in proc_list:
             if utility.array_to_string(proc.ImageFileName).lower() == "conhost.exe":
+                proc_id = "Unknown"
                 try:
                     proc_id = proc.UniqueProcessId
                     proc_layer_name = proc.add_process_layer()
@@ -100,8 +103,8 @@ class Consoles(interfaces.plugins.PluginInterface):
 
     @classmethod
     def find_conhostexe(
-        cls, conhost_proc: interfaces.context.ContextInterface
-    ) -> Tuple[int, int]:
+        cls, conhost_proc: interfaces.objects.ObjectInterface
+    ) -> Tuple[Optional[int], Optional[int]]:
         """
         Finds the base address of conhost.exe
 
@@ -130,7 +133,7 @@ class Consoles(interfaces.plugins.PluginInterface):
         config_path: str,
         conhost_layer_name: str,
         conhost_base: int,
-    ) -> Tuple[str, Type]:
+    ) -> Tuple[Optional[str], Dict[str, Type]]:
         """Tries to determine which symbol filename to use for the image's console information. This is similar to the
         netstat plugin.
 
@@ -146,7 +149,9 @@ class Consoles(interfaces.plugins.PluginInterface):
             The filename of the symbol table to use and the associated class types.
         """
 
-        is_64bit = symbols.symbol_table_is_64bit(context, nt_symbol_table)
+        is_64bit = symbols.symbol_table_is_64bit(
+            context=context, symbol_table_name=nt_symbol_table
+        )
 
         if is_64bit:
             arch = "x64"
@@ -341,6 +346,11 @@ class Consoles(interfaces.plugins.PluginInterface):
             conhost_base,
         )
 
+        if symbol_filename is None:
+            raise ValueError(
+                "Symbol filename could not be determined for conhost version"
+            )
+
         vollog.debug(f"Using symbol file '{symbol_filename}' and types {class_types}")
 
         return intermed.IntermediateSymbolTable.create(
@@ -362,10 +372,14 @@ class Consoles(interfaces.plugins.PluginInterface):
         procs: Generator[interfaces.objects.ObjectInterface, None, None],
         max_history: Set[int],
         max_buffers: Set[int],
-    ) -> Tuple[
-        interfaces.context.ContextInterface,
-        interfaces.context.ContextInterface,
-        Dict[str, Any],
+    ) -> Generator[
+        Tuple[
+            interfaces.objects.ObjectInterface,
+            Optional[interfaces.objects.ObjectInterface],
+            List[Any],
+        ],
+        None,
+        None,
     ]:
         """Gets the Console Information structure and its related properties for each conhost process
 
@@ -401,6 +415,11 @@ class Consoles(interfaces.plugins.PluginInterface):
                     "Unable to find the location of conhost.exe. Analysis cannot proceed."
                 )
                 continue
+            if conhostexe_size is None:
+                vollog.info(
+                    "Unable to determine the size of conhost.exe.  Analysis cannot proceed."
+                )
+                continue
             vollog.debug(f"Found conhost.exe base at {conhostexe_base:#x}")
 
             proc_layer = context.layers[proc_layer_name]
@@ -420,6 +439,7 @@ class Consoles(interfaces.plugins.PluginInterface):
             )
 
             found_console_info_for_proc = False
+            console_info = None
             # scan for potential _CONSOLE_INFORMATION structures by using the CommandHistorySize
             for max_history_value in max_history:
                 max_history_bytes = struct.pack("H", max_history_value)
@@ -431,7 +451,7 @@ class Consoles(interfaces.plugins.PluginInterface):
                     scanners.BytesScanner(max_history_bytes),
                     sections=[(conhostexe_base, conhostexe_size)],
                 ):
-
+                    console_info = None
                     console_properties = []
 
                     try:
@@ -779,8 +799,7 @@ class Consoles(interfaces.plugins.PluginInterface):
         cls,
         context: interfaces.context.ContextInterface,
         config_path: str,
-        kernel_layer_name: str,
-        kernel_symbol_table_name: str,
+        kernel_module_name: str,
         max_history: Set[int],
         max_buffers: Set[int],
     ) -> Tuple[Set[int], Set[int]]:
@@ -809,8 +828,7 @@ class Consoles(interfaces.plugins.PluginInterface):
         for hive in hivelist.HiveList.list_hives(
             context=context,
             base_config_path=config_path,
-            layer_name=kernel_layer_name,
-            symbol_table=kernel_symbol_table_name,
+            kernel_module_name=kernel_module_name,
             hive_offsets=None,
         ):
             try:
@@ -845,8 +863,7 @@ class Consoles(interfaces.plugins.PluginInterface):
             max_history, max_buffers = self.get_console_settings_from_registry(
                 self.context,
                 self.config_path,
-                kernel.layer_name,
-                kernel.symbol_table_name,
+                self.config["kernel"],
                 max_history,
                 max_buffers,
             )
@@ -917,8 +934,6 @@ class Consoles(interfaces.plugins.PluginInterface):
         return process_name.lower() != "conhost.exe"
 
     def run(self):
-        kernel = self.context.modules[self.config["kernel"]]
-
         return renderers.TreeGrid(
             [
                 ("PID", int),
@@ -931,8 +946,7 @@ class Consoles(interfaces.plugins.PluginInterface):
             self._generator(
                 pslist.PsList.list_processes(
                     context=self.context,
-                    layer_name=kernel.layer_name,
-                    symbol_table=kernel.symbol_table_name,
+                    kernel_module_name=self.config["kernel"],
                     filter_func=self._conhost_proc_filter,
                 )
             ),
