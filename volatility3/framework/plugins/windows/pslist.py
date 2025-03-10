@@ -340,7 +340,7 @@ class PsList(interfaces.plugins.PluginInterface, timeliner.TimeLinerInterface):
         return renderers.TreeGrid(
             [
                 ("1PID", int),
-                ("3PPID", int),
+                ("333333PPID", int),
                 ("444ImageFileName", str),
                 (f"4Offset{offsettype}", format_hints.Hex),
                 ("5Threads", int),
